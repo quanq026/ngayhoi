@@ -39,3 +39,10 @@ def dang_ky(d: DangKy):
         if cur.rowcount == 0:
             raise HTTPException(409, "HET_CHO")
         return {"ok": True}
+
+@app.get("/api/con-cho")
+def lay_con_cho(ma_phien: str):
+    with db_lock:
+        r = db.execute("SELECT COUNT(*) FROM dang_ky WHERE ma_phien = ?", (ma_phien,)).fetchone()
+        da_co = r[0] if r else 0
+        return {"con_cho": max(0, SUC_CHUA - da_co)}
