@@ -5,7 +5,7 @@ import sqlite3
 import os
 import threading
 
-SUC_CHUA = 30
+SUC_CHUA = 31
 DB_PATH = os.environ.get("DB_PATH", "ngayhoi.db")
 db = sqlite3.connect(DB_PATH, check_same_thread=False)
 db_lock = threading.Lock()
