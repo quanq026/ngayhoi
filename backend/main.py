@@ -1,50 +1,41 @@
-import sqlite3
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import sqlite3
+import os
+import threading
 
-# Khởi tạo cơ sở dữ liệu SQLite
-conn = sqlite3.connect("ngayhoi.db")
-cursor = conn.cursor()
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS dang_ky (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ma_sv TEXT NOT NULL,
-    ma_phien TEXT NOT NULL,
-    UNIQUE(ma_sv, ma_phien)
-)
-""")
-conn.commit()
-conn.close()
+SUC_CHUA = 30
+DB_PATH = os.environ.get("DB_PATH", "ngayhoi.db")
+db = sqlite3.connect(DB_PATH, check_same_thread=False)
+db_lock = threading.Lock()
+db.execute("""CREATE TABLE IF NOT EXISTS dang_ky(
+  ma_sv TEXT, ma_phien TEXT, UNIQUE(ma_sv, ma_phien))""")
 
-app = FastAPI(title="Dang ky Ngay hoi")
-
-# CORS: chỉ cho phép duy nhất địa chỉ của frontend
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = FastAPI()
+app.add_middleware(CORSMiddleware,
+    allow_origins=["http://localhost:5173"], allow_methods=["*"], allow_headers=["*"])
 
 class DangKy(BaseModel):
     ma_sv: str
     ma_phien: str
 
-@app.post("/api/dang-ky", status_code=status.HTTP_201_CREATED)
-def dang_ky(data: DangKy):
-    try:
-        with sqlite3.connect("ngayhoi.db") as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO dang_ky (ma_sv, ma_phien) VALUES (?, ?)",
-                (data.ma_sv, data.ma_phien),
-            )
-            conn.commit()
+@app.post("/api/dang-ky", status_code=201)
+def dang_ky(d: DangKy):
+    with db_lock:
+        # Kiểm tra trùng lặp sinh viên trước
+        r = db.execute("SELECT 1 FROM dang_ky WHERE ma_sv=? AND ma_phien=?", (d.ma_sv, d.ma_phien)).fetchone()
+        if r:
+            raise HTTPException(409, "DA_DANG_KY")
+
+        # Đếm và ghi trong một câu lệnh duy nhất (atomic)
+        cur = db.execute("""
+            INSERT INTO dang_ky(ma_sv, ma_phien)
+            SELECT ?, ?
+            WHERE (SELECT COUNT(*) FROM dang_ky WHERE ma_phien = ?) < ?
+        """, (d.ma_sv, d.ma_phien, d.ma_phien, SUC_CHUA))
+        db.commit()
+
+        if cur.rowcount == 0:
+            raise HTTPException(409, "HET_CHO")
         return {"ok": True}
-    except sqlite3.IntegrityError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="DA_DANG_KY",
-        )
